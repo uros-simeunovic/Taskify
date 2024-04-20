@@ -5,7 +5,7 @@ import { InputType, ReturnType } from "./types";
 import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { createSafeAction } from "@/lib/create-safe-action";
-import { UpdateCard } from "./schema";
+import { CopyCard } from "./schema";
 import { createAuditLog } from "@/lib/create-audit-log";
 import { ACTION, ENTITY_TYPE } from "@prisma/client";
 
@@ -18,11 +18,11 @@ const handler = async (data: InputType): Promise<ReturnType> => {
     };
   }
 
-  const { id, boardId, ...values } = data;
+  const { id, boardId } = data;
   let card;
 
   try {
-    card = await db.card.update({
+    const cardToCopy = await db.card.findUnique({
       where: {
         id,
         list: {
@@ -31,8 +31,30 @@ const handler = async (data: InputType): Promise<ReturnType> => {
           },
         },
       },
+    });
+
+    if (!cardToCopy) {
+      return { error: "Card not found" };
+    }
+
+    const lastCard = await db.card.findFirst({
+      where: {
+        listId: cardToCopy.listId,
+      },
+      orderBy: {
+        order: "desc",
+      },
+      select: { order: true },
+    });
+
+    const newOrder = lastCard ? lastCard.order + 1 : 1;
+
+    card = await db.card.create({
       data: {
-        ...values,
+        title: `${cardToCopy.title} - Copy`,
+        description: cardToCopy.description,
+        order: newOrder,
+        listId: cardToCopy.listId,
       },
     });
 
@@ -40,11 +62,11 @@ const handler = async (data: InputType): Promise<ReturnType> => {
       entityTitle: card.title,
       entityId: card.id,
       entityType: ENTITY_TYPE.CARD,
-      action: ACTION.UPDATE,
+      action: ACTION.CREATE,
     });
   } catch (error) {
     return {
-      error: "Failed to update.",
+      error: "Failed to copy.",
     };
   }
 
@@ -52,4 +74,4 @@ const handler = async (data: InputType): Promise<ReturnType> => {
   return { data: card };
 };
 
-export const updateCard = createSafeAction(UpdateCard, handler);
+export const copyCard = createSafeAction(CopyCard, handler);
